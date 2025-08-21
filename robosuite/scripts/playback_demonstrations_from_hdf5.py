@@ -58,7 +58,7 @@ if __name__ == "__main__":
     )
 
     writer = None
-    width, height, fps = 640, 480, 20
+    width, height, fps = 224, 224, 100
     if args.save_video:
         fourcc = cv2.VideoWriter_fourcc(*"mp4v")
         video_path = os.path.join(demo_path, "playback.mp4")
@@ -68,7 +68,8 @@ if __name__ == "__main__":
     # list of all demonstrations episodes
     demos = list(f["data"].keys())
 
-    while True:
+    # while True:
+    for _ in range(1):
         print("Playing back random episode... (press ESC to quit)")
 
         # select an episode randomly
@@ -102,6 +103,7 @@ if __name__ == "__main__":
 
                 if args.save_video:
                     frame = env.sim.render(width=width, height=height, camera_name="agentview")
+                    frame = np.flip(frame, axis=0)
                     frame = frame[..., ::-1]  # RGB -> BGR for OpenCV
                     writer.write(frame)
 
@@ -111,6 +113,13 @@ if __name__ == "__main__":
                     if not np.all(np.equal(states[j + 1], state_playback)):
                         err = np.linalg.norm(states[j + 1] - state_playback)
                         print(f"[warning] playback diverged by {err:.2f} for ep {ep} at step {j}")
+                # if cv2.waitKey(1) & 0xFF == 27:
+                #     print("[info] Viewer closed, exiting...")
+                #     if writer is not None:
+                #         writer.release()
+                #     f.close()
+                #     env.close()
+                #     exit(0)
 
         else:
 
@@ -124,8 +133,17 @@ if __name__ == "__main__":
 
                 if args.save_video:
                     frame = env.sim.render(width=width, height=height, camera_name="agentview")
+                    frame = np.flip(frame, axis=0)
                     frame = frame[..., ::-1]  # RGB -> BGR
                     writer.write(frame)
+
+                # if cv2.waitKey(1) & 0xFF == 27:
+                #     print("[info] Viewer closed, exiting...")
+                #     if writer is not None:
+                #         writer.release()
+                #     f.close()
+                #     env.close()
+                #     exit(0)
 
     if writer is not None:
         writer.release()

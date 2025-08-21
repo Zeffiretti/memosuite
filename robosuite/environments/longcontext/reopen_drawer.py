@@ -410,7 +410,7 @@ class ReopenDrawer(ManipulationEnv):
         self.drawer_height = 0.1
         self.drawer_depth = 0.1
 
-        self.target_drawer_id = 1
+        self.target_drawer_id = 0
         self.target_drawer_name = self.drawer.bodies[self.target_drawer_id]
         self.target_drawer_body_id = self.sim.model.body_name2id(self.target_drawer_name)
         self.stage_completion_hold_count = -1
