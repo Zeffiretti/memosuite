@@ -1,0 +1,11 @@
+{
+  "configurations": [
+    {
+      "name": "MJP Current File",
+      "type": "debugpy",
+      "program": "${file}",
+      "request": "launch",
+      // "python": "/Users/hiesh/miniforge3/envs/robosuite/bin/mjpython"
+    }
+  ]
+}

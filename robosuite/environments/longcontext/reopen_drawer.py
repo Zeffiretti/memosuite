@@ -4,15 +4,16 @@ import numpy as np
 
 from robosuite.environments.manipulation.manipulation_env import ManipulationEnv
 from robosuite.models.arenas import TableArena
-from robosuite.models.objects import BoxObject
+from robosuite.models.objects import BoxObject, MujocoXMLObject
 from robosuite.models.tasks import ManipulationTask
 from robosuite.utils.mjcf_utils import CustomMaterial
 from robosuite.utils.observables import Observable, sensor
-from robosuite.utils.placement_samplers import UniformRandomSampler
+from robosuite.utils.placement_samplers import UniformRandomSampler, SequentialCompositeSampler
 from robosuite.utils.transform_utils import convert_quat
+from robosuite.utils.mjcf_utils import array_to_string, find_elements, xml_path_completion
 
 
-class Lift(ManipulationEnv):
+class ReopenDrawer(ManipulationEnv):
     """
     This class corresponds to the lifting task for a single robot arm.
 
@@ -150,7 +151,7 @@ class Lift(ManipulationEnv):
         gripper_types="default",
         base_types="default",
         initialization_noise="default",
-        table_full_size=(0.8, 0.8, 0.05),
+        table_full_size=(1.0, 1.0, 0.05),
         table_friction=(1.0, 5e-3, 1e-4),
         use_camera_obs=True,
         use_object_obs=True,
@@ -192,6 +193,8 @@ class Lift(ManipulationEnv):
         # object placement initializer
         self.placement_initializer = placement_initializer
 
+        self.phase = 0
+
         super().__init__(
             robots=robots,
             env_configuration=env_configuration,
@@ -220,6 +223,11 @@ class Lift(ManipulationEnv):
             renderer_config=renderer_config,
             seed=seed,
         )
+
+    def _post_action(self, action):
+        # self._check_stage()
+
+        return super()._post_action(action)
 
     def reward(self, action=None):
         """
@@ -257,13 +265,13 @@ class Lift(ManipulationEnv):
 
             # reaching reward
             dist = self._gripper_to_target(
-                gripper=self.robots[0].gripper, target=self.cube.root_body, target_type="body", return_distance=True
+                gripper=self.robots[0].gripper, target=self.red_cube.root_body, target_type="body", return_distance=True
             )
             reaching_reward = 1 - np.tanh(10.0 * dist)
             reward += reaching_reward
 
             # grasping reward
-            if self._check_grasp(gripper=self.robots[0].gripper, object_geoms=self.cube):
+            if self._check_grasp(gripper=self.robots[0].gripper, object_geoms=self.red_cube):
                 reward += 0.25
 
         # Scale reward if requested
@@ -308,39 +316,79 @@ class Lift(ManipulationEnv):
             tex_attrib=tex_attrib,
             mat_attrib=mat_attrib,
         )
-        self.cube = BoxObject(
-            name="cube",
+        self.red_cube = BoxObject(
+            name="redcube",
             size_min=[0.020, 0.020, 0.020],  # [0.015, 0.015, 0.015],
-            size_max=[0.022, 0.022, 0.022],  # [0.018, 0.018, 0.018])
+            size_max=[0.021, 0.021, 0.021],  # [0.018, 0.018, 0.018])
             rgba=[1, 0, 0, 1],
             material=redwood,
             rng=self.rng,
         )
 
-        # Create placement initializer
-        if self.placement_initializer is not None:
-            self.placement_initializer.reset()
-            self.placement_initializer.add_objects(self.cube)
-        else:
-            self.placement_initializer = UniformRandomSampler(
-                name="ObjectSampler",
-                mujoco_objects=self.cube,
-                x_range=[-0.03, 0.03],
-                y_range=[-0.03, 0.03],
-                rotation=None,
-                ensure_object_boundary_in_range=False,
-                ensure_valid_placement=True,
-                reference_pos=self.table_offset,
-                z_offset=0.01,
-                rng=self.rng,
-            )
+        self.drawer = MujocoXMLObject(
+            fname=xml_path_completion("objects/cabinet.xml"),
+            name="drawer",
+            joints=[dict(type="free", damping="0.0005")],
+            obj_type="all",
+            duplicate_collision_geoms=True,
+        )
+        self.button = MujocoXMLObject(
+            fname=xml_path_completion("objects/button.xml"),
+            name="button",
+            joints=[dict(type="free", damping="0.0005")],
+            obj_type="all",
+            duplicate_collision_geoms=True,
+        )
+
+        cube_placement_initializer = UniformRandomSampler(
+            name="CubeSampler",
+            mujoco_objects=[self.red_cube],
+            x_range=[0.03, 0.06],
+            y_range=[0.13, 0.16],
+            rotation=None,
+            ensure_object_boundary_in_range=False,
+            ensure_valid_placement=True,
+            reference_pos=self.table_offset,
+            z_offset=0.01,
+            rng=self.rng,
+        )
+        drawer_placement_initializer = UniformRandomSampler(
+            name="ButtonSampler",
+            mujoco_objects=self.drawer,
+            x_range=[-0.06, -0.05],
+            y_range=[-0.35, -0.30],
+            rotation=0,
+            ensure_object_boundary_in_range=False,
+            ensure_valid_placement=True,
+            reference_pos=self.table_offset,
+            z_offset=0.01,
+            rng=self.rng,
+        )
+        button_placement_initializer = UniformRandomSampler(
+            name="DrawerSampler",
+            mujoco_objects=self.button,
+            x_range=[-0.03, 0.03],
+            y_range=[0.25, 0.30],
+            rotation=0,
+            ensure_object_boundary_in_range=False,
+            ensure_valid_placement=True,
+            reference_pos=self.table_offset,
+            z_offset=0.01,
+            rng=self.rng,
+        )
+        self.placement_initializer = SequentialCompositeSampler("ObjectSampler")
+        self.placement_initializer.append_sampler(cube_placement_initializer)
+        self.placement_initializer.append_sampler(drawer_placement_initializer)
+        self.placement_initializer.append_sampler(button_placement_initializer)
 
         # task includes arena, robot, and objects of interest
         self.model = ManipulationTask(
             mujoco_arena=mujoco_arena,
             mujoco_robots=[robot.robot_model for robot in self.robots],
-            mujoco_objects=self.cube,
+            mujoco_objects=[self.red_cube, self.button, self.drawer],
         )
+
+        # self.table_offset
 
     def _setup_references(self):
         """
@@ -351,7 +399,21 @@ class Lift(ManipulationEnv):
         super()._setup_references()
 
         # Additional object references from this env
-        self.cube_body_id = self.sim.model.body_name2id(self.cube.root_body)
+        self.cube_body_id = self.sim.model.body_name2id(self.red_cube.root_body)
+        self.button_joint_id = self.sim.model.joint_name2id(self.button.joints[0])
+        self.button_geom_id = self.sim.model.body_name2id(self.button.root_body)
+        self.drawer_id = self.sim.model.body_name2id(self.drawer.bodies[0])
+        self.drawer_joint1_id = self.sim.model.joint_name2id(self.drawer.joints[0])
+        self.drawer_joint2_id = self.sim.model.joint_name2id(self.drawer.joints[1])
+
+        self.drawer_width = 0.1
+        self.drawer_height = 0.1
+        self.drawer_depth = 0.1
+
+        self.target_drawer_id = 1
+        self.target_drawer_name = self.drawer.bodies[self.target_drawer_id]
+        self.target_drawer_body_id = self.sim.model.body_name2id(self.target_drawer_name)
+        self.stage_completion_hold_count = -1
 
     def _setup_observables(self):
         """
@@ -414,6 +476,8 @@ class Lift(ManipulationEnv):
             for obj_pos, obj_quat, obj in object_placements.values():
                 self.sim.data.set_joint_qpos(obj.joints[-1], np.concatenate([np.array(obj_pos), np.array(obj_quat)]))
 
+        self.phase = 0
+
     def visualize(self, vis_settings):
         """
         In addition to super call, visualize gripper site proportional to the distance to the cube.
@@ -428,7 +492,7 @@ class Lift(ManipulationEnv):
 
         # Color the gripper visualization site according to its distance to the cube
         if vis_settings["grippers"]:
-            self._visualize_gripper_to_target(gripper=self.robots[0].gripper, target=self.cube)
+            self._visualize_gripper_to_target(gripper=self.robots[0].gripper, target=self.red_cube)
 
     def _check_success(self):
         """
@@ -437,8 +501,82 @@ class Lift(ManipulationEnv):
         Returns:
             bool: True if cube has been lifted
         """
-        cube_height = self.sim.data.body_xpos[self.cube_body_id][2]
-        table_height = self.model.mujoco_arena.table_offset[2]
+        self._check_stage()
+        return self.phase == 5
+        # cube_height = self.sim.data.body_xpos[self.cube_body_id][2]
+        # table_height = self.model.mujoco_arena.table_offset[2]
 
-        # cube is higher than the table top above a margin
-        return cube_height > table_height + 0.04
+        # button_joint_position = self.sim.data.get_joint_qpos(self.button.joints[0])
+        # if button_joint_position <= -0.015:
+        #     self.sim.data.set_joint_qpos(self.button.joints[0], -0.016)
+        #     self.sim.data.set_joint_qvel(self.button.joints[0], 0)
+        #     # self.sim.model.geom_rgba[self.button_geom_id] = np.array([1, 1, 0, 1])
+        #     # print(f"button joint position: {button_joint_position}")
+
+        # # cube is higher than the table top above a margin
+        # return cube_height > table_height + 1
+
+    def _check_stage(self):
+        drawer_pos = self.sim.data.body_xpos[self.drawer_id]
+        # print(f"drawer pos: {drawer_pos}")
+        target_drawer_joint_pos = self.sim.data.get_joint_qpos(self.drawer.joints[self.target_drawer_id])
+        if self.phase < 1:
+            if target_drawer_joint_pos >= 0.17:
+                self.phase = 1
+                print(f"Stage {self.phase} achieved~!")
+            return
+        if self.phase < 2:
+            cube_pos = self.sim.data.body_xpos[self.cube_body_id]
+            target_drawer_pos = self.sim.data.body_xpos[self.target_drawer_body_id]
+            target_drawer_pos[1] += target_drawer_joint_pos
+            x_dist = abs(cube_pos[0] - target_drawer_pos[0])
+            y_dist = abs(cube_pos[1] - target_drawer_pos[1])
+            z_dist = cube_pos[2] - target_drawer_pos[2]
+            if x_dist < 0.25 and y_dist < 0.08 and z_dist < 0.1:
+                if self.stage_completion_hold_count == 0:
+                    self.stage_completion_hold_count = -1
+                    self.phase = 2
+                    print(f"Stage {self.phase} achieved~!")
+                elif self.stage_completion_hold_count == -1:
+                    self.stage_completion_hold_count = 50
+                else:
+                    self.stage_completion_hold_count -= 1
+
+            return
+        if self.phase < 3:
+            if target_drawer_joint_pos <= 0.02:
+                self.phase = 3
+                print(f"Stage {self.phase} achieved~!")
+            return
+        if self.phase < 4:
+            button_joint_pos = self.sim.data.get_joint_qpos(self.button.joints[0])
+            if button_joint_pos <= -0.018:
+                self.phase = 4
+                print(f"Stage {self.phase} achieved~!")
+            return
+        if self.phase < 5:
+            if target_drawer_joint_pos >= 0.17:
+                self.phase = 5
+                print(f"Stage {self.phase} achieved~!")
+            return
+
+    def _cube_in_drawer(self):
+        # 判断 cube 是否在 drawer 区域内
+        pass
+
+
+if __name__ == "__main__":
+    env = ReopenDrawer(
+        robots="Panda",
+        has_renderer=True,
+        has_offscreen_renderer=False,
+        use_camera_obs=False,
+    )
+    obs = env.reset()
+    for _ in range(env.horizon):
+        action = np.zeros(env.action_dim)
+        obs, reward, done, info = env.step(action)
+        env.render()
+        if done:
+            print("任务完成！")
+            break

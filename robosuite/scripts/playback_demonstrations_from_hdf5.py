@@ -18,6 +18,7 @@ import json
 import os
 import random
 
+import cv2
 import h5py
 import numpy as np
 
@@ -36,6 +37,7 @@ if __name__ == "__main__":
         "--use-actions",
         action="store_true",
     )
+    parser.add_argument("--save-video", action="store_true", help="If set, save the playback as a video")
     args = parser.parse_args()
 
     demo_path = args.folder
@@ -48,12 +50,20 @@ if __name__ == "__main__":
     env = robosuite.make(
         **env_info,
         has_renderer=True,
-        has_offscreen_renderer=False,
+        has_offscreen_renderer=True,
         ignore_done=True,
         use_camera_obs=False,
         reward_shaping=True,
         control_freq=20,
     )
+
+    writer = None
+    width, height, fps = 640, 480, 20
+    if args.save_video:
+        fourcc = cv2.VideoWriter_fourcc(*"mp4v")
+        video_path = os.path.join(demo_path, "playback.mp4")
+        writer = cv2.VideoWriter(video_path, fourcc, fps, (width, height))
+        print(f"[info] saving video to {video_path}")
 
     # list of all demonstrations episodes
     demos = list(f["data"].keys())
@@ -90,6 +100,11 @@ if __name__ == "__main__":
                 env.step(action)
                 env.render()
 
+                if args.save_video:
+                    frame = env.sim.render(width=width, height=height, camera_name="agentview")
+                    frame = frame[..., ::-1]  # RGB -> BGR for OpenCV
+                    writer.write(frame)
+
                 if j < num_actions - 1:
                     # ensure that the actions deterministically lead to the same recorded states
                     state_playback = env.sim.get_state().flatten()
@@ -107,4 +122,11 @@ if __name__ == "__main__":
                     env.viewer.update()
                 env.render()
 
+                if args.save_video:
+                    frame = env.sim.render(width=width, height=height, camera_name="agentview")
+                    frame = frame[..., ::-1]  # RGB -> BGR
+                    writer.write(frame)
+
+    if writer is not None:
+        writer.release()
     f.close()

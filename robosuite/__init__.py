@@ -13,6 +13,17 @@ from robosuite.environments.manipulation.two_arm_peg_in_hole import TwoArmPegInH
 from robosuite.environments.manipulation.two_arm_handover import TwoArmHandover
 from robosuite.environments.manipulation.two_arm_transport import TwoArmTransport
 
+# Custom environments
+from robosuite.environments.longcontext.reopen_drawer import ReopenDrawer
+from robosuite.environments.longcontext.rearrange_block import RearrangeBlock
+from robosuite.environments.longcontext.pushback_block import PushBackBlock
+from robosuite.environments.longcontext.repeat_nut_assembly import (
+    RepeatNutAssembly,
+    RepeatNutAssemblySquare,
+    RepeatNutAssemblyRound,
+    RepeatNutAssemblySingle,
+)
+
 from robosuite.environments import ALL_ENVIRONMENTS
 from robosuite.controllers import (
     ALL_PART_CONTROLLERS,

@@ -215,7 +215,7 @@ if __name__ == "__main__":
         type=str,
         default=os.path.join(suite.models.assets_root, "demonstrations_private"),
     )
-    parser.add_argument("--environment", type=str, default="Lift")
+    parser.add_argument("--environment", type=str, default="ReopenDrawer")
     parser.add_argument(
         "--robots",
         nargs="+",
