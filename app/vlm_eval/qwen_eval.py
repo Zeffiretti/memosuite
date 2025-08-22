@@ -1,28 +1,26 @@
-# -*- coding: utf-8 -*-
-
-"""
-qwen_video_inference.py
-
-功能：
-1. 从视频中提取帧（不处理音频）
-2. 将帧和问题组合成 Qwen2.5-3B 模型输入
-3. 调用 Qwen2.5-3B 生成视频理解回答
-4. 输出模型回答
-"""
-
 import os
 import ffmpeg
 from PIL import Image
 import torch
 import shutil
-from transformers import AutoProcessor, AutoModelForCausalLM, AutoModelForVision2Seq
+from transformers import AutoProcessor, AutoModelForVision2Seq
 
 
-# VIDEO_PATH = r"robosuite\\models\\assets\\demonstrations_private\\1755753640_4157922\\playback_cut.mp4"  # 视频路径
-VIDEO_PATH = r"robosuite\\models\\assets\\demonstrations_private\\1755780222_3869295\\playback_bottom_cut.mp4"
+MAX_FRAMES = 8
 FRAME_RATE = 1
-QUESTION = "Which drawer should I open again to find the red cube—the top one or the bottom one?"
 MODEL_ID = "Qwen/Qwen2.5-VL-3B-Instruct"
+
+# # ReopenDrawer
+# VIDEO_PATH = "robosuite/models/assets/demonstrations_private/1755753640_4157922/playback_cut.mp4"
+VIDEO_PATH = "robosuite/models/assets/demonstrations_private/1755753640_4157922/playback_bottom_cut.mp4"
+QUESTION = "Which drawer should I open again to find the red cube—the top one or the bottom one?"
+# QUESTION = "Which drawer should I open again to find the red cube—the white-handle one or the blue-handle one?"
+
+# # PushBackCube
+# VIDEO_PATH = "robosuite/models/assets/demonstrations_private/1755830752_495001/pushbackcube_cut.mp4"
+# QUESTION = (
+#     "Wchich direction should I move the cube to place it on the original position at the very begining of the video."
+# )
 
 
 def extract_video_frames(video_path, frame_rate=1):
@@ -55,6 +53,7 @@ def main():
     print("[INFO] Loading model...")
     processor = AutoProcessor.from_pretrained(MODEL_ID)
     model = AutoModelForVision2Seq.from_pretrained(MODEL_ID, torch_dtype=torch.float16, device_map="auto")
+    model.cuda().eval()
 
     messages = prepare_messages("frames", QUESTION)
 

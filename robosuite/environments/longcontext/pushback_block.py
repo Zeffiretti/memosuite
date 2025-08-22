@@ -223,9 +223,10 @@ class PushBackBlock(ManipulationEnv):
             renderer_config=renderer_config,
             seed=seed,
         )
+        self.cube_original_pos = np.zeros(3)
 
     def _post_action(self, action):
-        self._check_stage()
+        # self._check_stage()
 
         return super()._post_action(action)
 
@@ -367,8 +368,8 @@ class PushBackBlock(ManipulationEnv):
         cube_placement_initializer = UniformRandomSampler(
             name="CubeSampler",
             mujoco_objects=[self.red_cube, self.patch1, self.button],
-            x_range=[-0.20, 0.10],
-            y_range=[-0.20, 0.20],
+            x_range=[-0.20, 0.20],
+            y_range=[-0.25, 0.15],
             rotation=None,
             ensure_object_boundary_in_range=False,
             ensure_valid_placement=True,
@@ -376,42 +377,6 @@ class PushBackBlock(ManipulationEnv):
             z_offset=0.01,
             rng=self.rng,
         )
-        # patch1_placement_initializer = UniformRandomSampler(
-        #     name="Patch1Sampler",
-        #     mujoco_objects=self.patch1,
-        #     x_range=[-0.06, -0.05],
-        #     y_range=[-0.35, -0.30],
-        #     rotation=0,
-        #     ensure_object_boundary_in_range=False,
-        #     ensure_valid_placement=True,
-        #     reference_pos=self.table_offset,
-        #     z_offset=0.01,
-        #     rng=self.rng,
-        # )
-        # patch2_placement_initializer = UniformRandomSampler(
-        #     name="Patch2Sampler",
-        #     mujoco_objects=self.patch2,
-        #     x_range=[-0.06, -0.05],
-        #     y_range=[0.25, 0.30],
-        #     rotation=0,
-        #     ensure_object_boundary_in_range=False,
-        #     ensure_valid_placement=True,
-        #     reference_pos=self.table_offset,
-        #     z_offset=0.01,
-        #     rng=self.rng,
-        # )
-        # button_placement_initializer = UniformRandomSampler(
-        #     name="ButtonSampler",
-        #     mujoco_objects=self.button,
-        #     x_range=[-0.03, 0.03],
-        #     y_range=[0.15, 0.18],
-        #     rotation=0,
-        #     ensure_object_boundary_in_range=False,
-        #     ensure_valid_placement=True,
-        #     reference_pos=self.table_offset,
-        #     z_offset=0.01,
-        #     rng=self.rng,
-        # )
         self.placement_initializer = SequentialCompositeSampler("ObjectSampler")
 
         self.placement_initializer.append_sampler(cube_placement_initializer)
@@ -438,17 +403,7 @@ class PushBackBlock(ManipulationEnv):
 
         # Additional object references from this env
         self.cube_body_id = self.sim.model.body_name2id(self.red_cube.root_body)
-        # self.button_joint_id = self.sim.model.joint_name2id(self.button.joints[0])
-        # self.button_geom_id = self.sim.model.body_name2id(self.button.root_body)
-        self.drawer_id = self.sim.model.body_name2id(self.patch1.bodies[0])
-        # self.drawer_joint1_id = self.sim.model.joint_name2id(self.drawer.joints[0])
-        # self.drawer_joint2_id = self.sim.model.joint_name2id(self.drawer.joints[1])
-
-        self.patch1_body_id = self.sim.model.body_name2id(self.patch1.root_body)
-
-        self.drawer_width = 0.1
-        self.drawer_height = 0.1
-        self.drawer_depth = 0.1
+        self.patch_body_id = self.sim.model.body_name2id(self.patch1.root_body)
 
     def _setup_observables(self):
         """
@@ -511,9 +466,10 @@ class PushBackBlock(ManipulationEnv):
             # Loop through all objects and reset their positions
             for obj_pos, obj_quat, obj in object_placements.values():
                 self.sim.data.set_joint_qpos(obj.joints[-1], np.concatenate([np.array(obj_pos), np.array(obj_quat)]))
-                # if obj.name == self.patch1.name:
-                #     patch_pos = np.array(obj_pos)
+                if obj.name == self.red_cube.name:
+                    self.cube_original_pos = np.array(obj_pos)
 
+        self.phase = 0
         # patch_pos[2] += 0.05
         # joint_data = np.concatenate([patch_pos, np.array([1.0, 0, 0, 0])])
         # print(f"patch_pos: {joint_data}")
@@ -542,23 +498,30 @@ class PushBackBlock(ManipulationEnv):
         Returns:
             bool: True if cube has been lifted
         """
-        cube_height = self.sim.data.body_xpos[self.cube_body_id][2]
-        table_height = self.model.mujoco_arena.table_offset[2]
+        self._check_stage()
 
-        # button_joint_position = self.sim.data.get_joint_qpos(self.button.joints[0])
-        # if button_joint_position <= -0.015:
-        #     self.sim.data.set_joint_qpos(self.button.joints[0], -0.016)
-        #     self.sim.data.set_joint_qvel(self.button.joints[0], 0)
-        # self.sim.model.geom_rgba[self.button_geom_id] = np.array([1, 1, 0, 1])
-        # print(f"button joint position: {button_joint_position}")
-
-        # cube is higher than the table top above a margin
-        return cube_height > table_height + 1
+        return self.phase == 3
 
     def _check_stage(self):
-        drawer_pos = self.sim.data.body_xpos[self.drawer_id]
-        # print(f"drawer pos: {drawer_pos}")
-        pass
+        patch_pos = self.sim.data.body_xpos[self.patch_body_id]
+        cube_pos = self.sim.data.body_xpos[self.cube_body_id]
+        if self.phase < 1:
+            distance_to_patch = np.linalg.norm(cube_pos - patch_pos)
+            if distance_to_patch < 0.03:
+                self.phase = 1
+                print(f"Stage {self.phase} achieved~!")
+            return
+        if self.phase < 2:
+            button_joint_pos = self.sim.data.get_joint_qpos(self.button.joints[0])
+            if button_joint_pos <= -0.018:
+                self.phase = 2
+            return
+        if self.phase < 3:
+            distance_to_original_pos = np.linalg.norm(cube_pos - self.cube_original_pos)
+            if distance_to_original_pos <= 0.05:
+                self.phase = 3
+                print(f"Stage {self.phase} achieved~!")
+            return
 
     def _cube_in_drawer(self):
         # 判断 cube 是否在 drawer 区域内
@@ -566,7 +529,7 @@ class PushBackBlock(ManipulationEnv):
 
 
 if __name__ == "__main__":
-    env = RearrangeBlock(
+    env = PushBackBlock(
         robots="Panda",
         has_renderer=True,
         has_offscreen_renderer=False,
