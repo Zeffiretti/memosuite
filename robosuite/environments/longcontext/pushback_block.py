@@ -515,6 +515,7 @@ class PushBackBlock(ManipulationEnv):
             button_joint_pos = self.sim.data.get_joint_qpos(self.button.joints[0])
             if button_joint_pos <= -0.018:
                 self.phase = 2
+                print(f"Stage {self.phase} achieved~!")
             return
         if self.phase < 3:
             distance_to_original_pos = np.linalg.norm(cube_pos - self.cube_original_pos)

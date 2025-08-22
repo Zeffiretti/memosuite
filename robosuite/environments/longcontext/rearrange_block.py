@@ -223,9 +223,10 @@ class RearrangeBlock(ManipulationEnv):
             renderer_config=renderer_config,
             seed=seed,
         )
+        self.initial_cube_patch = None
+        self.initial_empty_patch = None
 
     def _post_action(self, action):
-        self._check_stage()
 
         return super()._post_action(action)
 
@@ -265,13 +266,16 @@ class RearrangeBlock(ManipulationEnv):
 
             # reaching reward
             dist = self._gripper_to_target(
-                gripper=self.robots[0].gripper, target=self.red_cube.root_body, target_type="body", return_distance=True
+                gripper=self.robots[0].gripper,
+                target=self.on_patch_cube.root_body,
+                target_type="body",
+                return_distance=True,
             )
             reaching_reward = 1 - np.tanh(10.0 * dist)
             reward += reaching_reward
 
             # grasping reward
-            if self._check_grasp(gripper=self.robots[0].gripper, object_geoms=self.red_cube):
+            if self._check_grasp(gripper=self.robots[0].gripper, object_geoms=self.on_patch_cube):
                 reward += 0.25
 
         # Scale reward if requested
@@ -316,7 +320,7 @@ class RearrangeBlock(ManipulationEnv):
             tex_attrib=tex_attrib,
             mat_attrib=mat_attrib,
         )
-        self.red_cube = BoxObject(
+        self.on_patch_cube = BoxObject(
             name="redcube",
             size_min=[0.020, 0.020, 0.020],  # [0.015, 0.015, 0.015],
             size_max=[0.021, 0.021, 0.021],  # [0.018, 0.018, 0.018])
@@ -324,7 +328,7 @@ class RearrangeBlock(ManipulationEnv):
             material=redwood,
             rng=self.rng,
         )
-        self.red_cube2 = BoxObject(
+        self.off_patch_cube = BoxObject(
             name="redcube2",
             size_min=[0.020, 0.020, 0.020],  # [0.015, 0.015, 0.015],
             size_max=[0.021, 0.021, 0.021],  # [0.018, 0.018, 0.018])
@@ -374,7 +378,7 @@ class RearrangeBlock(ManipulationEnv):
 
         cube_placement_initializer = UniformRandomSampler(
             name="CubeSampler",
-            mujoco_objects=[self.red_cube2],
+            mujoco_objects=[self.off_patch_cube],
             x_range=[0.03, 0.06],
             y_range=[0.03, 0.06],
             rotation=None,
@@ -388,7 +392,7 @@ class RearrangeBlock(ManipulationEnv):
             name="Patch1Sampler",
             mujoco_objects=self.patch1,
             x_range=[-0.06, -0.05],
-            y_range=[-0.35, -0.30],
+            y_range=[-0.25, -0.20],
             rotation=0,
             ensure_object_boundary_in_range=False,
             ensure_valid_placement=True,
@@ -431,7 +435,7 @@ class RearrangeBlock(ManipulationEnv):
         self.model = ManipulationTask(
             mujoco_arena=mujoco_arena,
             mujoco_robots=[robot.robot_model for robot in self.robots],
-            mujoco_objects=[self.red_cube, self.button, self.patch1, self.patch2, self.red_cube2],
+            mujoco_objects=[self.on_patch_cube, self.button, self.patch1, self.patch2, self.off_patch_cube],
         )
 
         # self.table_offset
@@ -445,18 +449,16 @@ class RearrangeBlock(ManipulationEnv):
         super()._setup_references()
 
         # Additional object references from this env
-        self.cube_body_id = self.sim.model.body_name2id(self.red_cube.root_body)
+        self.on_patch_cube_body_id = self.sim.model.body_name2id(self.on_patch_cube.root_body)
+        self.off_patch_cube_body_id = self.sim.model.body_name2id(self.off_patch_cube.root_body)
+
         self.button_joint_id = self.sim.model.joint_name2id(self.button.joints[0])
         self.button_geom_id = self.sim.model.body_name2id(self.button.root_body)
-        self.drawer_id = self.sim.model.body_name2id(self.patch1.bodies[0])
         # self.drawer_joint1_id = self.sim.model.joint_name2id(self.drawer.joints[0])
         # self.drawer_joint2_id = self.sim.model.joint_name2id(self.drawer.joints[1])
 
         self.patch1_body_id = self.sim.model.body_name2id(self.patch1.root_body)
-
-        self.drawer_width = 0.1
-        self.drawer_height = 0.1
-        self.drawer_depth = 0.1
+        self.patch2_body_id = self.sim.model.body_name2id(self.patch2.root_body)
 
     def _setup_observables(self):
         """
@@ -475,11 +477,11 @@ class RearrangeBlock(ManipulationEnv):
             # cube-related observables
             @sensor(modality=modality)
             def cube_pos(obs_cache):
-                return np.array(self.sim.data.body_xpos[self.cube_body_id])
+                return np.array(self.sim.data.body_xpos[self.on_patch_cube_body_id])
 
             @sensor(modality=modality)
             def cube_quat(obs_cache):
-                return convert_quat(np.array(self.sim.data.body_xquat[self.cube_body_id]), to="xyzw")
+                return convert_quat(np.array(self.sim.data.body_xquat[self.on_patch_cube_body_id]), to="xyzw")
 
             sensors = [cube_pos, cube_quat]
 
@@ -510,6 +512,8 @@ class RearrangeBlock(ManipulationEnv):
         super()._reset_internal()
 
         # Reset all object positions using initializer sampler if we're not directly loading from an xml
+        self.initial_cube_patch = self.patch1
+        self.initial_empty_patch = self.patch2
         patch_pos = np.zeros(3)
         if not self.deterministic_reset:
 
@@ -519,13 +523,14 @@ class RearrangeBlock(ManipulationEnv):
             # Loop through all objects and reset their positions
             for obj_pos, obj_quat, obj in object_placements.values():
                 self.sim.data.set_joint_qpos(obj.joints[-1], np.concatenate([np.array(obj_pos), np.array(obj_quat)]))
-                if obj.name == self.patch1.name:
+                if obj.name == self.initial_cube_patch.name:
                     patch_pos = np.array(obj_pos)
 
         patch_pos[2] += 0.05
         joint_data = np.concatenate([patch_pos, np.array([1.0, 0, 0, 0])])
         print(f"patch_pos: {joint_data}")
-        self.sim.data.set_joint_qpos(self.red_cube.joints[-1], joint_data)
+        self.sim.data.set_joint_qpos(self.on_patch_cube.joints[-1], joint_data)
+        self.phase = 0
 
     def visualize(self, vis_settings):
         """
@@ -541,7 +546,7 @@ class RearrangeBlock(ManipulationEnv):
 
         # Color the gripper visualization site according to its distance to the cube
         if vis_settings["grippers"]:
-            self._visualize_gripper_to_target(gripper=self.robots[0].gripper, target=self.red_cube)
+            self._visualize_gripper_to_target(gripper=self.robots[0].gripper, target=self.on_patch_cube)
 
     def _check_success(self):
         """
@@ -550,23 +555,37 @@ class RearrangeBlock(ManipulationEnv):
         Returns:
             bool: True if cube has been lifted
         """
-        cube_height = self.sim.data.body_xpos[self.cube_body_id][2]
-        table_height = self.model.mujoco_arena.table_offset[2]
-
-        button_joint_position = self.sim.data.get_joint_qpos(self.button.joints[0])
-        if button_joint_position <= -0.015:
-            self.sim.data.set_joint_qpos(self.button.joints[0], -0.016)
-            self.sim.data.set_joint_qvel(self.button.joints[0], 0)
-            # self.sim.model.geom_rgba[self.button_geom_id] = np.array([1, 1, 0, 1])
-            # print(f"button joint position: {button_joint_position}")
-
+        self._check_stage()
         # cube is higher than the table top above a margin
-        return cube_height > table_height + 1
+        return self.phase == 3
 
     def _check_stage(self):
-        drawer_pos = self.sim.data.body_xpos[self.drawer_id]
-        # print(f"drawer pos: {drawer_pos}")
-        pass
+        if self.phase < 1:
+            if self.initial_empty_patch is None:
+                return
+            off_cube_pos = self.sim.data.body_xpos[self.off_patch_cube_body_id]
+            target_patch_pos = self.sim.data.get_body_xpos(self.initial_empty_patch.root_body)
+            distance_to_patch = np.linalg.norm(off_cube_pos - target_patch_pos)
+            if distance_to_patch < 0.03:
+                self.phase = 1
+                print(f"Stage {self.phase} achieved~!")
+            return
+        if self.phase < 2:
+            button_joint_pos = self.sim.data.get_joint_qpos(self.button.joints[0])
+            if button_joint_pos <= -0.018:
+                self.phase = 2
+                print(f"Stage {self.phase} achieved~!")
+            return
+        if self.phase < 3:
+            if self.initial_cube_patch is None:
+                return
+            on_cube_pos = self.sim.data.body_xpos[self.on_patch_cube_body_id]
+            target_patch_pos = self.sim.data.get_body_xpos(self.initial_cube_patch.root_body)
+            distance_to_patch = np.linalg.norm(on_cube_pos - target_patch_pos)
+            if distance_to_patch > 0.10:
+                self.phase = 3
+                print(f"Stage {self.phase} achieved~!")
+            return
 
     def _cube_in_drawer(self):
         # 判断 cube 是否在 drawer 区域内
